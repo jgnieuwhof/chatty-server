@@ -13,6 +13,8 @@ const server = () => {
 
   const prepareMessage = msg => JSON.stringify(msg);
 
+  let clients = [];
+
   wss.broadcast = (data, omit = null) => {
     wss.clients.forEach(client => {
       if ((!omit || omit !== client) && client.readyState === WebSocket.OPEN) {
@@ -22,11 +24,18 @@ const server = () => {
   };
 
   wss.on('connection', ws => {
-    console.log('client connected');
+    const client = { id: uuid() };
+    clients = [...clients, client];
+    console.log(`client "${client.id}" connected`);
+
+    setTimeout(() => {
+      ws.send(prepareMessage({ type: 'incomingClientInit', content: client }));
+      wss.broadcast({ type: 'incomingClients', content: clients });
+    }, 500);
+
     ws.on('message', x => {
       const id = uuid();
       const { type, content } = JSON.parse(x);
-      console.log({ type, content });
       switch (type) {
         case 'postMessage':
           wss.broadcast({ type: 'incomingMessage', id, content });
@@ -39,7 +48,12 @@ const server = () => {
           break;
       }
     });
-    ws.on('close', () => console.log('client disconnected'));
+
+    ws.on('close', () => {
+      clients = clients.filter(x => x.id !== client.id);
+      wss.broadcast({ type: 'incomingClients', content: clients });
+      console.log(`client "${client.id}" disconnected`);
+    });
   });
 };
 
