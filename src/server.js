@@ -13,7 +13,18 @@ const server = () => {
 
   const prepareMessage = msg => JSON.stringify(msg);
 
-  let clients = [];
+  const getRandomColor = () => {
+    var letters = '0123456789ABCDEF';
+    var color = '#';
+    for (var i = 0; i < 6; i++) {
+      color += letters[Math.floor(Math.random() * 16)];
+    }
+    return color;
+  };
+
+  let state = {
+    clients: []
+  };
 
   wss.broadcast = (data, omit = null) => {
     wss.clients.forEach(client => {
@@ -23,25 +34,48 @@ const server = () => {
     });
   };
 
+  const updateClient = ({ id, update }) => {
+    state.clients = state.clients.map(
+      c => (c.id == id ? { ...c, ...update } : c)
+    );
+  };
+
   wss.on('connection', ws => {
-    const client = { id: uuid() };
-    clients = [...clients, client];
-    console.log(`client "${client.id}" connected`);
+    const id = uuid();
+    state.clients = [
+      ...state.clients,
+      { id, name: 'Anonymous', color: getRandomColor() }
+    ];
+    const client = () => state.clients.find(c => c.id === id);
+
+    console.log(`client "${client().id}" connected`);
 
     setTimeout(() => {
-      ws.send(prepareMessage({ type: 'incomingClientInit', content: client }));
-      wss.broadcast({ type: 'incomingClients', content: clients });
+      ws.send(
+        prepareMessage({ type: 'incomingClientInit', content: client() })
+      );
+      wss.broadcast({ type: 'incomingClients', content: state.clients });
     }, 500);
 
     ws.on('message', x => {
-      const id = uuid();
       const { type, content } = JSON.parse(x);
       switch (type) {
         case 'postMessage':
-          wss.broadcast({ type: 'incomingMessage', id, content });
+          wss.broadcast({ type: 'incomingMessage', id: uuid(), content });
           break;
-        case 'postNotification':
-          wss.broadcast({ type: 'incomingNotification', id, content });
+        case 'postChangeUsername':
+          const oldName = client().name;
+          updateClient({ id, update: { name: content.name } });
+          wss.broadcast({ type: 'incomingUpdateClient', content: client() });
+          wss.broadcast({
+            type: 'incomingNotification',
+            id: uuid(),
+            content: {
+              userId: id,
+              username: content.name,
+              content: `${oldName} changed their username to ${content.name}`
+            }
+          });
           break;
         default:
           console.error(`Unrecognized message:\n"${x}"`);
@@ -50,8 +84,8 @@ const server = () => {
     });
 
     ws.on('close', () => {
-      clients = clients.filter(x => x.id !== client.id);
-      wss.broadcast({ type: 'incomingClients', content: clients });
+      state.clients = state.clients.filter(x => x.id !== id);
+      wss.broadcast({ type: 'incomingClients', content: state.clients });
       console.log(`client "${client.id}" disconnected`);
     });
   });
